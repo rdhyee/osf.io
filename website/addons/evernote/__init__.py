@@ -1,12 +1,11 @@
-from website.addons.evernote import model
-
+from website.addons.evernote import model, routes
 
 # MUST
 
 SHORT_NAME = 'evernote'
 FULL_NAME = 'Evernote'
 
-ROUTES = []
+ROUTES = [routes.api_routes]
 
 MODELS = []
 
@@ -28,9 +27,13 @@ INCLUDE_JS = {}
 INCLUDE_CSS = {}
 
 # I think the following are musts too
-
-#OWNERS = ['user', 'node']
 OWNERS = ['user', 'node']
+
+# 'accounts' to have add-on show up in /settings/addons
+# https://github.com/CenterForOpenScience/osf.io/blob/release/0.56.0/website/profile/views.py#L361
+# 'node' presumably in the node addons setup (?)
+
+CONFIGS = ['accounts', 'node']
 
 
 MODELS = [
@@ -40,4 +43,3 @@ MODELS = [
 
 USER_SETTINGS_MODEL = model.EvernoteUserSettings
 NODE_SETTINGS_MODEL = model.EvernoteNodeSettings
-
