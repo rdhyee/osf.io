@@ -287,7 +287,6 @@ CitationGrid.prototype.initTreebeard = function() {
                 return self.resolveRowAux.call(self, arguments);
             },
             ondataloaderror: function(err) {
-                $osf.handleAddonApiHTTPError(err);
                 $(self.gridSelector).html(errorPage);
             }
         },
@@ -317,7 +316,7 @@ CitationGrid.prototype.initStyleSelect = function() {
         allowClear: false,
         formatResult: formatResult,
         formatSelection: formatSelection,
-        placeholder: 'Citation Style (e.g. "APA")',
+        placeholder: 'Enter citation style (e.g. "APA")',
         minimumInputLength: 1,
         ajax: {
             url: '/api/v1/citations/styles/',
@@ -340,9 +339,11 @@ CitationGrid.prototype.initStyleSelect = function() {
             self.updateStyle(event.val, xml);
         }).fail(function(jqxhr, status, error) {
             Raven.captureMessage('Error while selecting citation style: ' + event.val, {
-                url: styleUrl,
-                status: status,
-                error: error
+                extra: {
+                    url: styleUrl,
+                    status: status,
+                    error: error
+                }
             });
         });
     });
@@ -352,7 +353,7 @@ CitationGrid.prototype.updateStyle = function(name, xml) {
     this.styleName = name;
     this.styleXml = xml;
     this.bibliographies = {};
-    this.treebeard.tbController.redraw();
+    this.treebeard.redraw();
 };
 
 CitationGrid.prototype.makeBibliography = function(folder, format) {

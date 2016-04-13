@@ -52,6 +52,7 @@ class JSONAPIParser(JSONParser):
 
         relationships = resource_object.get('relationships')
         is_relationship = parser_context.get('is_relationship')
+        attributes_required = parser_context.get('attributes_required', True)
         request_method = parser_context['request'].method
 
         # Request must include "relationships" or "attributes"
@@ -59,7 +60,7 @@ class JSONAPIParser(JSONParser):
             if not relationships:
                 raise JSONAPIException(source={'pointer': '/data/relationships'}, detail=NO_RELATIONSHIPS_ERROR)
         else:
-            if "attributes" not in resource_object and request_method != 'DELETE':
+            if 'attributes' not in resource_object and attributes_required and request_method != 'DELETE':
                 raise JSONAPIException(source={'pointer': '/data/attributes'}, detail=NO_ATTRIBUTES_ERROR)
 
         object_id = resource_object.get('id')
@@ -117,5 +118,74 @@ class JSONAPIParser(JSONParser):
 class JSONAPIParserForRegularJSON(JSONAPIParser):
     """
     Allows same processing as JSONAPIParser to occur for requests with application/json media type.
+    """
+    media_type = 'application/json'
+
+class JSONAPIRelationshipParser(JSONParser):
+    """
+    Parses JSON-serialized data for relationship endpoints. Overrides media_type.
+    """
+    media_type = 'application/vnd.api+json'
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        res = super(JSONAPIRelationshipParser, self).parse(stream, media_type, parser_context)
+
+        if not isinstance(res, dict):
+            raise ParseError('Request body must be dictionary')
+        data = res.get('data')
+
+        if data:
+            if not isinstance(data, list):
+                raise ParseError('Data must be an array')
+            for i, datum in enumerate(data):
+
+                if datum.get('id') is None:
+                    raise JSONAPIException(source={'pointer': '/data/{}/id'.format(str(i))}, detail=NO_ID_ERROR)
+
+                if datum.get('type') is None:
+                    raise JSONAPIException(source={'pointer': '/data/{}/type'.format(str(i))}, detail=NO_TYPE_ERROR)
+
+            return {'data': data}
+
+        return {'data': []}
+
+class JSONAPIRelationshipParserForRegularJSON(JSONAPIRelationshipParser):
+    """
+    Allows same processing as JSONAPIRelationshipParser to occur for requests with application/json media type.
+    """
+    media_type = 'application/json'
+
+
+class JSONAPIOnetoOneRelationshipParser(JSONParser):
+    """
+    Parses JSON-serialized data for relationship endpoints. Overrides media_type.
+    """
+    media_type = 'application/vnd.api+json'
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        res = super(JSONAPIOnetoOneRelationshipParser, self).parse(stream, media_type, parser_context)
+
+        if not isinstance(res, dict):
+            raise ParseError('Request body must be dictionary')
+        data = res.get('data')
+
+        if data:
+            id_ = data.get('id')
+            type_ = data.get('type')
+
+            if id_ is None:
+                raise JSONAPIException(source={'pointer': '/data/id'}, detail=NO_ID_ERROR)
+
+            if type_ is None:
+                raise JSONAPIException(source={'pointer': '/data/type'}, detail=NO_TYPE_ERROR)
+
+            return data
+
+        return {'type': None, 'id': None}
+
+
+class JSONAPIOnetoOneRelationshipParserForRegularJSON(JSONAPIOnetoOneRelationshipParser):
+    """
+    Allows same processing as JSONAPIRelationshipParser to occur for requests with application/json media type.
     """
     media_type = 'application/json'

@@ -64,31 +64,32 @@ class FileDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, FileMixin):
     ####File Entity
 
         name          type       description
-        -------------------------------------------------------------------------
-        name          string     name of the file
-        path          string     unique identifier for this file entity for this
-                                 project and storage provider. may not end with '/'
-        materialized  string     the full path of the file relative to the storage
-                                 root.  may not end with '/'
-        kind          string     "file"
-        etag          string     etag - http caching identifier w/o wrapping quotes
-        modified      timestamp  last modified timestamp - format depends on provider
-        contentType   string     MIME-type when available
-        provider      string     id of provider e.g. "osfstorage", "s3", "googledrive".
-                                 equivalent to addon_short_name on the OSF
-        size          integer    size of file in bytes
-        extra         object     may contain additional data beyond what's described here,
-                                 depending on the provider
-          version     integer    version number of file. will be 1 on initial upload
-          downloads   integer    count of the number times the file has been downloaded
+        =========================================================================
+        name          string            name of the file
+        path          string            unique identifier for this file entity for this
+                                        project and storage provider. may not end with '/'
+        materialized  string            the full path of the file relative to the storage
+                                        root.  may not end with '/'
+        kind          string            "file"
+        etag          string            etag - http caching identifier w/o wrapping quotes
+        modified      timestamp         last modified timestamp - format depends on provider
+        contentType   string            MIME-type when available
+        provider      string            id of provider e.g. "osfstorage", "s3", "googledrive".
+                                        equivalent to addon_short_name on the OSF
+        size          integer           size of file in bytes
+        tags          array of strings  list of tags that describes the file (osfstorage only)
+        extra         object            may contain additional data beyond what's described here,
+                                        depending on the provider
+          version     integer           version number of file. will be 1 on initial upload
+          downloads   integer           count of the number times the file has been downloaded
           hashes      object
-            md5       string     md5 hash of file
-            sha256    string     SHA-256 hash of file
+            md5       string            md5 hash of file
+            sha256    string            SHA-256 hash of file
 
     ####Folder Entity
 
         name          type    description
-        ----------------------------------------------------------------------
+        ======================================================================
         name          string  name of the folder
         path          string  unique identifier for this folder entity for this
                               project and storage provider. must end with '/'
@@ -107,23 +108,31 @@ class FileDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, FileMixin):
     null for folders.  A list of storage provider keys can be found [here](/v2/#storage-providers).
 
         name          type               description
-        ---------------------------------------------------------------------------------
-        name          string             name of the file or folder; used for display
-        kind          string             "file" or "folder"
-        path          string             same as for corresponding WaterButler entity
-        size          integer            size of file in bytes, null for folders
-        provider      string             storage provider for this file. "osfstorage" if stored on the OSF.  Other
-                                         examples include "s3" for Amazon S3, "googledrive" for Google Drive, "box"
-                                         for Box.com.
-        last_touched  iso8601 timestamp  last time the metadata for the file was retrieved. only applies to non-OSF
-                                         storage providers.
-        date_modified iso8601 timestamp  timestamp of when this file was last updated
-        extra         object             may contain additional data beyond what's described here, depending on
-                                         the provider
-          hashes      object
-            md5       string             md5 hash of file, null for folders
-            sha256    string             SHA-256 hash of file, null for folders
+        ===================================================================================================
+        name              string             name of the file or folder; used for display
+        kind              string             "file" or "folder"
+        path              string             same as for corresponding WaterButler entity
+        materialized_path string             the unix-style path to the file relative to the provider root
+        size              integer            size of file in bytes, null for folders
+        provider          string             storage provider for this file. "osfstorage" if stored on the
+                                             OSF.  other examples include "s3" for Amazon S3, "googledrive"
+                                             for Google Drive, "box" for Box.com.
+        last_touched      iso8601 timestamp  last time the metadata for the file was retrieved. only
+                                             applies to non-OSF storage providers.
+        date_modified     iso8601 timestamp  timestamp of when this file was last updated*
+        date_created      iso8601 timestamp  timestamp of when this file was created*
+        extra             object             may contain additional data beyond what's described here,
+                                             depending on the provider
+          hashes          object
+            md5           string             md5 hash of file, null for folders
+            sha256        string             SHA-256 hash of file, null for folders
 
+    * A note on timestamps: for files stored in osfstorage, `date_created` refers to the time the file was
+    first uploaded to osfstorage, and `date_modified` is the time the file was last updated while in osfstorage.
+    Other providers may or may not provide this information, but if they do it will correspond to the provider's
+    semantics for created/modified times.  These timestamps may also be stale; metadata retrieved via the File Detail
+    endpoint is cached.  The `last_touched` field describes the last time the metadata was retrieved from the external
+    provider.  To force a metadata update, access the parent folder via its Node Files List endpoint.
 
     ##Relationships
 
@@ -189,13 +198,12 @@ class FileDetail(JSONAPIBaseView, generics.RetrieveUpdateAPIView, FileMixin):
         URL:          /links/upload
         Query Params: ?kind=file&name={new_file_name}
         Body (Raw):   <file data (not form-encoded)>
-        Success:      201 Created or 200 OK + new file representation
+        Success:      201 Created + new file representation
 
     To upload a file to a folder, issue a PUT request to the folder's `upload` link with the raw file data in the
     request body, and the `kind` and `name` query parameters set to `'file'` and the desired name of the file.  The
     response will contain a [WaterButler file entity](#file-entity) that describes the new file.  If a file with the
-    same name already exists in the folder, it will be considered a new version.  In this case, the response will be a
-    200 OK.
+    same name already exists in the folder, the server will return a 409 Conflict error response.
 
     ###Update Existing File (*file*)
 
@@ -324,7 +332,7 @@ class FileVersionsList(JSONAPIBaseView, generics.ListAPIView, FileMixin):
     For an OSF FileVersion entity the API `type` is "file_versions".
 
         name          type     description
-        ---------------------------------------------------------------------------------
+        =================================================================================
         size          integer  size of file in bytes
         content_type  string   MIME content-type for the file. May be null if unavailable.
 
@@ -383,7 +391,7 @@ class FileVersionDetail(JSONAPIBaseView, generics.RetrieveAPIView, FileMixin):
     For an OSF FileVersion entity the API `type` is "file_versions".
 
         name          type     description
-        ---------------------------------------------------------------------------------
+        =================================================================================
         size          integer  size of file in bytes
         content_type  string   MIME content-type for the file. May be null if unavailable.
 

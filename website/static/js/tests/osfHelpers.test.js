@@ -74,7 +74,8 @@ describe('osfHelpers', () => {
             responseJSON: {
                 message_short: 'Oh no!',
                 message_long: 'Something went wrong'
-            }
+            },
+            status: 400
         };
         it('uses the response body if available', () => {
             $osf.handleJSONError(response);
@@ -347,7 +348,13 @@ describe('osfHelpers', () => {
             var dateString = [year, month, day].join('-');
             var dateTimeString = dateString + 'T' + [hour, minute, second].join(':') + '.' + millisecond.toString();
 
-            var assertDateEqual = function(date, year, month, day, hour, minute, second, millisecond) {
+            var assertDateEqual = function(date, year, month, day) {
+                assert.equal(date.getUTCFullYear(), year);
+                assert.equal(date.getUTCMonth(), month - 1); // Javascript months count from 0
+                assert.equal(date.getUTCDate(), day);
+            };
+
+            var assertDateTimeEqual = function(date, year, month, day, hour, minute, second, millisecond) {
                 assert.equal(date.getUTCFullYear(), year);
                 assert.equal(date.getUTCMonth(), month - 1); // Javascript months count from 0
                 assert.equal(date.getUTCDate(), day);
@@ -368,20 +375,19 @@ describe('osfHelpers', () => {
         });
         it('should parse date strings', () => {
             var parsedDate = new $osf.FormattableDate(dateString).date;
-            var parsedDateTime = new $osf.FormattableDate(dateTimeString).date;
-            assertDateEqual(parsedDate, year, month, day, 0, 0, 0, 0);
+            assertDateEqual(parsedDate, year, month, day);
         });
         it('should parse datetime strings', () => {
             var parsedDateTime = new $osf.FormattableDate(dateTimeString).date;
-            assertDateEqual(parsedDateTime, year, month, day, hour, minute, second, millisecond);
+            assertDateTimeEqual(parsedDateTime, year, month, day, hour, minute, second, millisecond);
         });
         it('should allow datetimes with UTC offsets', () => {
             var parsedDateTime = null;
-            var UTCOffsets = ['+00', '+00:00', '+0000', 'Z'];
+            var UTCOffsets = ['+00', '-00', '+00:00', '-00:00', '+0000', '-0000', 'Z'];
 
             UTCOffsets.forEach(function(offset) {
                 parsedDateTime = new $osf.FormattableDate(dateTimeString + offset).date;
-                assertDateEqual(parsedDateTime, year, month, day, hour, minute, second, millisecond);
+                assertDateTimeEqual(parsedDateTime, year, month, day, hour, minute, second, millisecond);
             });
         });
         it('should allow datetimes with positive offsets', () => {
@@ -389,7 +395,7 @@ describe('osfHelpers', () => {
             var positiveOffset = '+02:00';
 
             parsedDateTime = new $osf.FormattableDate(dateTimeString + positiveOffset).date;
-            assertDateEqual(parsedDateTime, year, month, day, hour - 2, minute, second, millisecond);
+            assertDateTimeEqual(parsedDateTime, year, month, day, hour - 2, minute, second, millisecond);
 
         });
         it('should allow datetimes with negative offsets', () => {
@@ -397,7 +403,7 @@ describe('osfHelpers', () => {
             var negativeOffset = '-02:00';
 
             parsedDateTime = new $osf.FormattableDate(dateTimeString + negativeOffset).date;
-            assertDateEqual(parsedDateTime, year, month, day, hour + 2, minute, second, millisecond);
+            assertDateTimeEqual(parsedDateTime, year, month, day, hour + 2, minute, second, millisecond);
         });
     });
 
@@ -465,6 +471,27 @@ describe('osfHelpers', () => {
             };
             var found = $osf.indexOf(list, search);
             assert.equal(-1, found);
+        });
+    });
+    
+    describe('any', () => {
+        it('returns true if any of the values in an array are truthy', () => {
+            var TRUTHY = [true, {}, [], 42, 'foo', new Date()];
+            $.each(TRUTHY, function(_, item) {
+                assert.isTrue(
+                    $osf.any([false, item, false])
+                );
+            });
+        });
+        it('returns false if none of the values in an array are truthy', () => {
+            assert.isFalse(
+                $osf.any([false, null, undefined, 0, NaN, ''])
+            );
+        });
+        it('returns false if the array is empty', () => {
+            assert.isFalse(
+                $osf.any([])
+            );            
         });
     });
 });

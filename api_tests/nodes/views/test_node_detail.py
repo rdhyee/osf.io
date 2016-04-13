@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 from urlparse import urlparse
 from nose.tools import *  # flake8: noqa
+import functools
 
 from framework.auth.core import Auth
+from modularodm import Q
 
 from website.models import NodeLog
-from website.views import find_dashboard
+from website.views import find_bookmark_collection
 from website.util import permissions
 from website.util.sanitize import strip_html
 
@@ -17,9 +19,15 @@ from tests.factories import (
     ProjectFactory,
     RegistrationFactory,
     AuthUserFactory,
-    FolderFactory,
-    CommentFactory
+    CollectionFactory,
+    CommentFactory,
+    NodeLicenseRecordFactory,
 )
+
+from website.project.licenses import ensure_licenses
+from website.project.licenses import NodeLicense
+
+ensure_licenses = functools.partial(ensure_licenses, warn=False)
 
 from tests.utils import assert_logs, assert_not_logs
 
@@ -38,6 +46,9 @@ class TestNodeDetail(ApiTestCase):
 
         self.public_component = NodeFactory(parent=self.public_project, creator=self.user, is_public=True)
         self.public_component_url = '/{}nodes/{}/'.format(API_BASE, self.public_component._id)
+        self.read_permissions = ['read']
+        self.write_permissions = ['read', 'write']
+        self.admin_permissions = ['read', 'admin', 'write']
 
     def test_return_public_project_details_logged_out(self):
         res = self.app.get(self.public_url)
@@ -46,27 +57,49 @@ class TestNodeDetail(ApiTestCase):
         assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
         assert_equal(res.json['data']['attributes']['description'], self.public_project.description)
         assert_equal(res.json['data']['attributes']['category'], self.public_project.category)
+        assert_items_equal(res.json['data']['attributes']['current_user_permissions'], self.read_permissions)
 
-    def test_return_public_project_details_logged_in(self):
+    def test_return_public_project_details_contributor_logged_in(self):
         res = self.app.get(self.public_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         assert_equal(res.content_type, 'application/vnd.api+json')
         assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
         assert_equal(res.json['data']['attributes']['description'], self.public_project.description)
         assert_equal(res.json['data']['attributes']['category'], self.public_project.category)
+        assert_items_equal(res.json['data']['attributes']['current_user_permissions'], self.admin_permissions)
+
+    def test_return_public_project_details_non_contributor_logged_in(self):
+        res = self.app.get(self.public_url, auth=self.user_two.auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.content_type, 'application/vnd.api+json')
+        assert_equal(res.json['data']['attributes']['title'], self.public_project.title)
+        assert_equal(res.json['data']['attributes']['description'], self.public_project.description)
+        assert_equal(res.json['data']['attributes']['category'], self.public_project.category)
+        assert_items_equal(res.json['data']['attributes']['current_user_permissions'], self.read_permissions)
 
     def test_return_private_project_details_logged_out(self):
         res = self.app.get(self.private_url, expect_errors=True)
         assert_equal(res.status_code, 401)
         assert_in('detail', res.json['errors'][0])
 
-    def test_return_private_project_details_logged_in_contributor(self):
+    def test_return_private_project_details_logged_in_admin_contributor(self):
         res = self.app.get(self.private_url, auth=self.user.auth)
         assert_equal(res.status_code, 200)
         assert_equal(res.content_type, 'application/vnd.api+json')
         assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
         assert_equal(res.json['data']['attributes']['description'], self.private_project.description)
         assert_equal(res.json['data']['attributes']['category'], self.private_project.category)
+        assert_items_equal(res.json['data']['attributes']['current_user_permissions'], self.admin_permissions)
+
+    def test_return_private_project_details_logged_in_write_contributor(self):
+        self.private_project.add_contributor(contributor=self.user_two, auth=Auth(self.user), save=True)
+        res = self.app.get(self.private_url, auth=self.user_two.auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.content_type, 'application/vnd.api+json')
+        assert_equal(res.json['data']['attributes']['title'], self.private_project.title)
+        assert_equal(res.json['data']['attributes']['description'], self.private_project.description)
+        assert_equal(res.json['data']['attributes']['category'], self.private_project.category)
+        assert_items_equal(res.json['data']['attributes']['current_user_permissions'], self.write_permissions)
 
     def test_return_private_project_details_logged_in_non_contributor(self):
         res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
@@ -93,15 +126,17 @@ class TestNodeDetail(ApiTestCase):
         expected_url = self.public_url + 'children/'
         assert_equal(urlparse(url).path, expected_url)
 
-    def test_node_contributors_embedded(self):
+    def test_node_has_contributors_link(self):
         res = self.app.get(self.public_url)
-        returned_id = res.json['data']['embeds']['contributors']['data'][0]['id']
-        assert_equal(returned_id, self.user._id)
+        url = res.json['data']['relationships']['contributors']['links']['related']['href']
+        expected_url = self.public_url + 'contributors/'
+        assert_equal(urlparse(url).path, expected_url)
 
-    def test_node_has_pointers_embedded(self):
+    def test_node_has_node_links_link(self):
         res = self.app.get(self.public_url)
-        returned_node_link = res.json['data']['embeds']['node_links']['data']
-        assert_equal(returned_node_link, [])
+        url = res.json['data']['relationships']['node_links']['links']['related']['href']
+        expected_url = self.public_url + 'node_links/'
+        assert_equal(urlparse(url).path, expected_url)
 
     def test_node_has_registrations_link(self):
         res = self.app.get(self.public_url)
@@ -115,29 +150,31 @@ class TestNodeDetail(ApiTestCase):
         expected_url = self.public_url + 'files/'
         assert_equal(urlparse(url).path, expected_url)
 
-    def test_node_does_not_have_comments_link(self):
+    def test_node_has_comments_link(self):
         res = self.app.get(self.public_url)
         assert_equal(res.status_code, 200)
-        assert_not_in('comments', res.json['data']['relationships'].keys())
+        assert_in('comments', res.json['data']['relationships'].keys())
+        assert_in('filter[target]={}'.format(self.public_project._id),
+                  res.json['data']['relationships']['comments']['links']['related']['href'])
 
     def test_node_has_correct_unread_comments_count(self):
         contributor = AuthUserFactory()
         self.public_project.add_contributor(contributor=contributor, auth=Auth(self.user), save=True)
-        comment = CommentFactory(node=self.public_project, target=self.public_project, user=contributor)
+        comment = CommentFactory(node=self.public_project, user=contributor, page='node')
         res = self.app.get(self.public_url + '?related_counts=True', auth=self.user.auth)
-        unread_comments = res.json['data']['relationships']['comments']['links']['related']['meta']['unread']
-        assert_equal(unread_comments, 1)
+        unread = res.json['data']['relationships']['comments']['links']['related']['meta']['unread']
+        unread_comments_node = unread['node']
+        assert_equal(unread_comments_node, 1)
 
     def test_node_properties(self):
         res = self.app.get(self.public_url)
         assert_equal(res.json['data']['attributes']['public'], True)
         assert_equal(res.json['data']['attributes']['registration'], False)
         assert_equal(res.json['data']['attributes']['collection'], False)
-        assert_equal(res.json['data']['attributes']['dashboard'], False)
         assert_equal(res.json['data']['attributes']['tags'], [])
 
     def test_requesting_folder_returns_error(self):
-        folder = NodeFactory(is_folder=True, creator=self.user)
+        folder = NodeFactory(is_collection=True, creator=self.user)
         res = self.app.get(
             '/{}nodes/{}/'.format(API_BASE, folder._id),
             auth=self.user.auth,
@@ -145,14 +182,13 @@ class TestNodeDetail(ApiTestCase):
         )
         assert_equal(res.status_code, 404)
 
-    def test_registrations_cannot_be_returned_at_node_detail_endpoint(self):
+    def test_cannot_return_registrations_at_node_detail_endpoint(self):
         registration = RegistrationFactory(project=self.public_project, creator=self.user)
         res = self.app.get('/{}nodes/{}/'.format(API_BASE, registration._id), auth=self.user.auth, expect_errors=True)
-        assert_equal(res.status_code, 400)
-        assert_equal(res.json['errors'][0]['detail'], 'This is a registration.')
+        assert_equal(res.status_code, 404)
 
     def test_cannot_return_folder_at_node_detail_endpoint(self):
-        folder = FolderFactory(creator=self.user)
+        folder = CollectionFactory(creator=self.user)
         res = self.app.get('/{}nodes/{}/'.format(API_BASE, folder._id), auth=self.user.auth, expect_errors=True)
         assert_equal(res.status_code, 404)
 
@@ -401,7 +437,7 @@ class TestNodeUpdate(NodeCRUDTestCase):
             }
         }, auth=self.user.auth, expect_errors=True)
         registration.reload()
-        assert_equal(res.status_code, 403)
+        assert_equal(res.status_code, 404)
         assert_equal(registration.title, original_title)
         assert_equal(registration.description, original_description)
 
@@ -692,6 +728,16 @@ class TestNodeUpdate(NodeCRUDTestCase):
         assert_equal(res.status_code, 400)
         assert_equal(res.json['errors'][0]['detail'], 'Title cannot exceed 200 characters.')
 
+    def test_public_project_with_publicly_editable_wiki_turns_private(self):
+        wiki = self.public_project.get_addon('wiki')
+        wiki.set_editing(permissions=True, auth=Auth(user=self.user), log=True)
+        res = self.app.patch_json_api(
+            self.public_url,
+            make_node_payload(self.public_project, {'public': False}),
+            auth=self.user.auth  # self.user is creator/admin
+        )
+        assert_equal(res.status_code, 200)
+
 
 class TestNodeDelete(NodeCRUDTestCase):
 
@@ -771,14 +817,14 @@ class TestNodeDelete(NodeCRUDTestCase):
             'Any child components must be deleted prior to deleting this project.'
         )
 
-    def test_delete_dashboard_returns_error(self):
-        dashboard_node = find_dashboard(self.user)
+    def test_delete_bookmark_collection_returns_error(self):
+        bookmark_collection = find_bookmark_collection(self.user)
         res = self.app.delete_json_api(
-            '/{}nodes/{}/'.format(API_BASE, dashboard_node._id),
+            '/{}nodes/{}/'.format(API_BASE, bookmark_collection._id),
             auth=self.user.auth,
             expect_errors=True
         )
-        # Dashboards are a folder, so a 404 is returned
+        # Bookmark collections are collections, so a 404 is returned
         assert_equal(res.status_code, 404)
 
 
@@ -838,6 +884,7 @@ class TestNodeTags(ApiTestCase):
     def setUp(self):
         super(TestNodeTags, self).setUp()
         self.user = AuthUserFactory()
+        self.admin = AuthUserFactory()
         self.user_two = AuthUserFactory()
         self.read_only_contributor = AuthUserFactory()
 
@@ -845,6 +892,7 @@ class TestNodeTags(ApiTestCase):
         self.public_project.add_contributor(self.user, permissions=permissions.DEFAULT_CONTRIBUTOR_PERMISSIONS, save=True)
         self.private_project = ProjectFactory(title="Project Two", is_public=False, creator=self.user)
         self.private_project.add_contributor(self.user, permissions=permissions.DEFAULT_CONTRIBUTOR_PERMISSIONS, save=True)
+        self.private_project.add_contributor(self.admin, permissions=permissions.CREATOR_PERMISSIONS, save=True)
         self.public_url = '/{}nodes/{}/'.format(API_BASE, self.public_project._id)
         self.private_url = '/{}nodes/{}/'.format(API_BASE, self.private_project._id)
 
@@ -903,6 +951,27 @@ class TestNodeTags(ApiTestCase):
         reload_res = self.app.get(self.private_url, auth=self.user.auth)
         assert_equal(len(reload_res.json['data']['attributes']['tags']), 1)
         assert_equal(reload_res.json['data']['attributes']['tags'][0], 'new-tag')
+
+    def test_partial_update_project_does_not_clear_tags(self):
+        res = self.app.patch_json_api(self.private_url, self.private_payload, auth=self.admin.auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
+        new_payload = {
+            'data': {
+                'id': self.private_project._id,
+                'type': 'nodes',
+                'attributes': {
+                    'public': True
+                }
+            }
+        }
+        res = self.app.patch_json_api(self.private_url, new_payload, auth=self.admin.auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
+        new_payload['data']['attributes']['public'] = False
+        res = self.app.patch_json_api(self.private_url, new_payload, auth=self.admin.auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']['attributes']['tags']), 1)
 
     def test_non_authenticated_user_cannot_add_tag_to_public_project(self):
         res = self.app.patch_json_api(self.public_url, self.one_new_tag_json, expect_errors=True, auth=None)
@@ -967,3 +1036,59 @@ class TestNodeTags(ApiTestCase):
         res = self.app.patch_json_api(self.public_url, self.one_new_tag_json, auth=self.user.auth, expect_errors=True)
         assert_equal(res.status_code, 400)
         assert_equal(res.json['errors'][0]['detail'], 'Expected a list of items but got type "dict".')
+
+
+class TestNodeLicense(ApiTestCase):
+    def setUp(self):
+        super(TestNodeLicense, self).setUp()
+        self.user = AuthUserFactory()
+        self.admin = AuthUserFactory()
+        self.user_two = AuthUserFactory()
+        self.read_only_contributor = AuthUserFactory()
+
+        self.public_project = ProjectFactory(title="Project One", is_public=True, creator=self.user)
+        self.public_project.add_contributor(self.user, permissions=permissions.DEFAULT_CONTRIBUTOR_PERMISSIONS, save=True)
+        self.private_project = ProjectFactory(title="Project Two", is_public=False, creator=self.user)
+        self.private_project.add_contributor(self.user, permissions=permissions.DEFAULT_CONTRIBUTOR_PERMISSIONS, save=True)
+        self.private_project.add_contributor(self.admin, permissions=permissions.CREATOR_PERMISSIONS, save=True)
+        self.public_url = '/{}nodes/{}/'.format(API_BASE, self.public_project._id)
+        self.private_url = '/{}nodes/{}/'.format(API_BASE, self.private_project._id)
+        ensure_licenses()
+        self.LICENSE_NAME = 'MIT License'
+        self.node_license = NodeLicense.find_one(
+            Q('name', 'eq', self.LICENSE_NAME)
+        )
+        self.YEAR = '2105'
+        self.COPYRIGHT_HOLDERS = ['Foo', 'Bar']
+        self.public_project.node_license = NodeLicenseRecordFactory(
+            node_license=self.node_license,
+            year=self.YEAR,
+            copyright_holders=self.COPYRIGHT_HOLDERS
+        )
+        self.public_project.save()
+        self.private_project.node_license = NodeLicenseRecordFactory(
+            node_license=self.node_license,
+            year=self.YEAR,
+            copyright_holders=self.COPYRIGHT_HOLDERS
+        )
+        self.private_project.save()
+
+    def test_public_node_has_node_license(self):
+        res = self.app.get(self.public_url)
+        assert_equal(self.public_project.node_license.year, res.json['data']['attributes']['node_license']['year'])
+
+    def test_public_node_has_license_relationship(self):
+        res = self.app.get(self.public_url)
+        expected_license_url = '/{}licenses/{}'.format(API_BASE, self.node_license._id)
+        actual_license_url = res.json['data']['relationships']['license']['links']['related']['href']
+        assert_in(expected_license_url, actual_license_url)
+
+    def test_private_node_has_node_license(self):
+        res = self.app.get(self.private_url, auth=self.user.auth)
+        assert_equal(self.private_project.node_license.year, res.json['data']['attributes']['node_license']['year'])
+
+    def test_private_node_has_license_relationship(self):
+        res = self.app.get(self.private_url, auth=self.user.auth)
+        expected_license_url = '/{}licenses/{}'.format(API_BASE, self.node_license._id)
+        actual_license_url = res.json['data']['relationships']['license']['links']['related']['href']
+        assert_in(expected_license_url, actual_license_url)

@@ -7,7 +7,6 @@ import logging
 import unittest
 import functools
 import datetime as dt
-from flask import g
 from json import dumps
 
 import blinker
@@ -20,9 +19,12 @@ from faker import Factory
 from nose.tools import *  # noqa (PEP8 asserts)
 from pymongo.errors import OperationFailure
 from modularodm import storage
+from django.test import SimpleTestCase, override_settings
+from django.test import TestCase as DjangoTestCase
 
 
-from api.base.wsgi import application as django_app
+from api.base.wsgi import application as api_django_app
+from admin.base.wsgi import application as admin_django_app
 from framework.mongo import set_up_storage
 from framework.auth import User
 from framework.sessions.model import Session
@@ -30,6 +32,7 @@ from framework.guid.model import Guid
 from framework.mongo import client as client_proxy
 from framework.mongo import database as database_proxy
 from framework.transactions import commands, messages, utils
+from framework.celery_tasks.handlers import celery_before_request
 
 from website.project.model import (
     Node, NodeLog, Tag, WatchConfig, MetaSchema,
@@ -40,17 +43,21 @@ from website import settings
 from website.addons.wiki.model import NodeWikiPage
 
 import website.models
+from website.notifications.listeners import subscribe_contributor, subscribe_creator
 from website.signals import ALL_SIGNALS
-from website.project.signals import contributor_added
+from website.project.signals import contributor_added, project_created
 from website.app import init_app
 from website.addons.base import AddonConfig
 from website.project.views.contributor import notify_added_contributor
 
-try:
-    DEFAULT_METASCHEMA = MetaSchema.find()[0]
-except IndexError:
-    ensure_schemas()
-    DEFAULT_METASCHEMA = MetaSchema.find()[0]
+
+def get_default_metaschema():
+    """This needs to be a method so it gets called after the test database is set up"""
+    try:
+        return MetaSchema.find()[0]
+    except IndexError:
+        ensure_schemas()
+        return MetaSchema.find()[0]
 
 # Just a simple app without routing set up or backends
 test_app = init_app(
@@ -68,6 +75,7 @@ SILENT_LOGGERS = [
     'website.mails',
     'website.search_migration.migrate',
     'website.util.paths',
+    'api.caching.tasks'
 ]
 for logger_name in SILENT_LOGGERS:
     logging.getLogger(logger_name).setLevel(logging.CRITICAL)
@@ -151,10 +159,11 @@ class DbTestCase(unittest.TestCase):
         settings.BCRYPT_LOG_ROUNDS = cls._original_bcrypt_log_rounds
 
 
-class AppTestCase(unittest.TestCase):
+class   AppTestCase(unittest.TestCase):
     """Base `TestCase` for OSF tests that require the WSGI app (but no database).
     """
 
+    PUSH_CONTEXT = True
     DISCONNECTED_SIGNALS = {
         # disconnect notify_add_contributor so that add_contributor does not send "fake" emails in tests
         contributor_added: [notify_added_contributor]
@@ -163,30 +172,25 @@ class AppTestCase(unittest.TestCase):
     def setUp(self):
         super(AppTestCase, self).setUp()
         self.app = TestApp(test_app)
+        if not self.PUSH_CONTEXT:
+            return
         self.context = test_app.test_request_context()
         self.context.push()
         with self.context:
-            g._celery_tasks = []
+            celery_before_request()
         for signal in self.DISCONNECTED_SIGNALS:
             for receiver in self.DISCONNECTED_SIGNALS[signal]:
                 signal.disconnect(receiver)
 
     def tearDown(self):
         super(AppTestCase, self).tearDown()
+        if not self.PUSH_CONTEXT:
+            return
         with mock.patch('website.mailchimp_utils.get_mailchimp_api'):
             self.context.pop()
         for signal in self.DISCONNECTED_SIGNALS:
             for receiver in self.DISCONNECTED_SIGNALS[signal]:
                 signal.connect(receiver)
-
-
-class ApiAppTestCase(unittest.TestCase):
-    """Base `TestCase` for OSF API tests that require the WSGI app (but no database).
-    """
-
-    def setUp(self):
-        super(ApiAppTestCase, self).setUp()
-        self.app = TestAppJSONAPI(django_app)
 
 
 class JSONAPIWrapper(object):
@@ -238,6 +242,16 @@ class TestAppJSONAPI(TestApp, JSONAPIWrapper):
     put_json_api = json_api_method('PUT')
     patch_json_api = json_api_method('PATCH')
     delete_json_api = json_api_method('DELETE')
+
+
+@override_settings(DEBUG_PROPAGATE_EXCEPTIONS=True)
+class ApiAppTestCase(SimpleTestCase):
+    """Base `TestCase` for OSF API v2 tests that require the WSGI app (but no database).
+    """
+    def setUp(self):
+        super(ApiAppTestCase, self).setUp()
+        self.app = TestAppJSONAPI(api_django_app)
+
 
 class UploadTestCase(unittest.TestCase):
 
@@ -316,7 +330,42 @@ class ApiTestCase(DbTestCase, ApiAppTestCase, UploadTestCase, MockRequestTestCas
     def setUp(self):
         super(ApiTestCase, self).setUp()
         settings.USE_EMAIL = False
-        
+
+
+class AdminTestCase(DbTestCase, DjangoTestCase, UploadTestCase, MockRequestTestCase):
+    pass
+
+
+class NotificationTestCase(OsfTestCase):
+    """An `OsfTestCase` to use when testing specific subscription behavior.
+    Use when you'd like to manually create all Node subscriptions and subscriptions
+    for added contributors yourself, and not rely on automatically added ones.
+    """
+    DISCONNECTED_SIGNALS = {
+        # disconnect signals so that add_contributor does not send "fake" emails in tests
+        contributor_added: [notify_added_contributor, subscribe_contributor],
+        project_created: [subscribe_creator]
+    }
+
+    def setUp(self):
+        super(NotificationTestCase, self).setUp()
+
+    def tearDown(self):
+        super(NotificationTestCase, self).tearDown()
+
+
+class ApiWikiTestCase(ApiTestCase):
+
+    def setUp(self):
+        from tests.factories import AuthUserFactory
+        super(ApiWikiTestCase, self).setUp()
+        self.user = AuthUserFactory()
+        self.non_contributor = AuthUserFactory()
+
+    def _add_project_wiki_page(self, node, user):
+        from tests.factories import NodeWikiFactory
+        # API will only return current wiki pages
+        return NodeWikiFactory(node=node, user=user)
 
 # From Flask-Security: https://github.com/mattupstate/flask-security/blob/develop/flask_security/utils.py
 class CaptureSignals(object):

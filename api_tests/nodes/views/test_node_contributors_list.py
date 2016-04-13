@@ -65,6 +65,7 @@ class TestNodeContributorList(NodeCRUDTestCase):
         self.private_url = '/{}nodes/{}/contributors/'.format(API_BASE, self.private_project._id)
         self.public_url = '/{}nodes/{}/contributors/'.format(API_BASE, self.public_project._id)
 
+
     def test_return_public_contributor_list_logged_out(self):
         self.public_project.add_contributor(self.user_two, save=True)
 
@@ -119,6 +120,57 @@ class TestNodeContributorList(NodeCRUDTestCase):
         errors = res.json['errors']
         assert_equal(len(errors), 1)
         assert_equal(errors[0]['detail'], "'middle_name' is not a valid field for this endpoint.")
+
+    def test_disabled_contributors_contain_names_under_meta(self):
+        self.public_project.add_contributor(self.user_two, save=True)
+
+        self.user_two.is_disabled = True
+        self.user_two.save()
+
+        res = self.app.get(self.public_url)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.content_type, 'application/vnd.api+json')
+        assert_equal(len(res.json['data']), 2)
+        assert_equal(res.json['data'][0]['id'], self.user._id)
+        assert_equal(res.json['data'][1]['id'], self.user_two._id)
+        assert_equal(res.json['data'][1]['embeds']['users']['errors'][0]['meta']['full_name'], self.user_two.fullname)
+        assert_equal(res.json['data'][1]['embeds']['users']['errors'][0]['detail'], 'The requested user is no longer available.')
+
+    def test_total_bibliographic_contributor_count_returned_in_metadata(self):
+        non_bibliographic_user = UserFactory()
+        self.public_project.add_contributor(non_bibliographic_user, visible=False, auth=Auth(self.public_project.creator))
+        self.public_project.save()
+        res = self.app.get(self.public_url, auth=self.user_two.auth)
+        assert_equal(res.status_code, 200)
+        assert_equal(res.json['links']['meta']['total_bibliographic'], len(self.public_project.visible_contributor_ids))
+
+    def test_unregistered_contributor_field_is_null_if_account_claimed(self):
+        project = ProjectFactory(creator=self.user, public=True)
+        url = '/{}nodes/{}/contributors/'.format(API_BASE, project._id)
+        res = self.app.get(url, auth=self.user.auth, expect_errors=True)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']), 1)
+        assert_equal(res.json['data'][0]['attributes'].get('unregistered_contributor'), None)
+
+    def test_unregistered_contributors_show_up_as_name_associated_with_project(self):
+        project = ProjectFactory(creator=self.user, public=True)
+        project.add_unregistered_contributor('Robert Jackson', 'robert@gmail.com', auth=Auth(self.user), save=True)
+        url = '/{}nodes/{}/contributors/'.format(API_BASE, project._id)
+        res = self.app.get(url, auth=self.user.auth, expect_errors=True)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']), 2)
+        assert_equal(res.json['data'][1]['embeds']['users']['data']['attributes']['full_name'], 'Robert Jackson')
+        assert_equal(res.json['data'][1]['attributes'].get('unregistered_contributor'), 'Robert Jackson')
+
+        project_two = ProjectFactory(creator=self.user, public=True)
+        project_two.add_unregistered_contributor('Bob Jackson', 'robert@gmail.com', auth=Auth(self.user), save=True)
+        url = '/{}nodes/{}/contributors/'.format(API_BASE, project_two._id)
+        res = self.app.get(url, auth=self.user.auth, expect_errors=True)
+        assert_equal(res.status_code, 200)
+        assert_equal(len(res.json['data']), 2)
+
+        assert_equal(res.json['data'][1]['embeds']['users']['data']['attributes']['full_name'], 'Robert Jackson')
+        assert_equal(res.json['data'][1]['attributes'].get('unregistered_contributor'), 'Bob Jackson')
 
 
 class TestNodeContributorFiltering(ApiTestCase):
@@ -860,10 +912,10 @@ class TestNodeContributorBulkCreate(NodeCRUDTestCase):
         assert_equal(len(res.json['data']), 1)
 
     def test_node_contributor_bulk_create_limits(self):
-        node_contrib_create_list = {'data': [self.payload_one] * 11}
+        node_contrib_create_list = {'data': [self.payload_one] * 101}
         res = self.app.post_json_api(self.public_url, node_contrib_create_list,
                                      auth=self.user.auth, expect_errors=True, bulk=True)
-        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 10, got 11.')
+        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 100, got 101.')
         assert_equal(res.json['errors'][0]['source']['pointer'], '/data')
 
     def test_node_contributor_bulk_create_no_type(self):
@@ -1089,9 +1141,9 @@ class TestNodeContributorBulkUpdate(NodeCRUDTestCase):
         assert_equal(res.json['errors'][0]['detail'], 'Could not find all objects to update.')
 
     def test_bulk_update_contributors_limits(self):
-        contrib_update_list = {'data': [self.payload_one] * 11}
+        contrib_update_list = {'data': [self.payload_one] * 101}
         res = self.app.put_json_api(self.public_url, contrib_update_list, auth=self.user.auth, expect_errors=True, bulk=True)
-        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 10, got 11.')
+        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 100, got 101.')
         assert_equal(res.json['errors'][0]['source']['pointer'], '/data')
 
     def test_bulk_update_contributors_invalid_permissions(self):
@@ -1116,6 +1168,25 @@ class TestNodeContributorBulkUpdate(NodeCRUDTestCase):
         assert_items_equal([data[0]['attributes']['permission'], data[1]['attributes']['permission'], data[2]['attributes']['permission']],
                            ['admin', 'read', 'read'])
 
+    def test_bulk_update_contributors_must_have_at_least_one_bibliographic_contributor(self):
+        res = self.app.put_json_api(self.public_url, {'data': [self.payload_two,
+                                                               {'id': self.user._id, 'type': 'contributors',
+                                                                'attributes': {'permission': 'admin', 'bibliographic': False}},
+                                                               {'id': self.user_two._id, 'type': 'contributors',
+                                                                'attributes': {'bibliographic': False}}
+                                                               ]},
+                                    auth=self.user.auth, expect_errors=True, bulk=True)
+
+        assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail'], 'Must have at least one visible contributor')
+
+    def test_bulk_update_contributors_must_have_at_least_one_admin(self):
+        res = self.app.put_json_api(self.public_url, {'data': [self.payload_two,
+                                                               {'id': self.user._id, 'type': 'contributors',
+                                                                'attributes': {'permission': 'read'}}]},
+                                    auth=self.user.auth, expect_errors=True, bulk=True)
+        assert_equal(res.status_code, 400)
+        assert_equal(res.json['errors'][0]['detail'], '{} is the only admin.'.format(self.user.fullname))
 
 class TestNodeContributorBulkPartialUpdate(NodeCRUDTestCase):
 
@@ -1272,10 +1343,10 @@ class TestNodeContributorBulkPartialUpdate(NodeCRUDTestCase):
         assert_equal(res.json['errors'][0]['detail'], 'Could not find all objects to update.')
 
     def test_bulk_partial_update_contributors_limits(self):
-        contrib_update_list = {'data': [self.payload_one] * 11}
+        contrib_update_list = {'data': [self.payload_one] * 101}
         res = self.app.patch_json_api(self.public_url, contrib_update_list, auth=self.user.auth,
                                       expect_errors=True, bulk=True)
-        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 10, got 11.')
+        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 100, got 101.')
         assert_equal(res.json['errors'][0]['source']['pointer'], '/data')
 
     def test_bulk_partial_update_invalid_permissions(self):
@@ -1460,10 +1531,10 @@ class TestNodeContributorBulkDelete(NodeCRUDTestCase):
         assert_equal(len(res.json['data']), 3)
 
     def test_bulk_delete_contributors_limits(self):
-        new_payload = {'data': [self.payload_one] * 11 }
+        new_payload = {'data': [self.payload_one] * 101 }
         res = self.app.delete_json_api(self.public_url, new_payload, auth=self.user.auth, expect_errors=True, bulk=True)
         assert_equal(res.status_code, 400)
-        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 10, got 11.')
+        assert_equal(res.json['errors'][0]['detail'], 'Bulk operation limit is 100, got 101.')
         assert_equal(res.json['errors'][0]['source']['pointer'], '/data')
 
     def test_bulk_delete_contributors_no_payload(self):

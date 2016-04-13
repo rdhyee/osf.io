@@ -47,6 +47,16 @@ api_routes = {
 
         Rule(
             [
+                '/project/<pid>/evernote/user_auth/',
+                '/project/<pid>/node/<nid>/evernote/user_auth/'
+            ],
+            'delete',
+            views.evernote_deauthorize_node,
+            json_renderer,
+        ),
+
+        Rule(
+            [
                 '/project/<pid>/evernote/folders/',
                 '/project/<pid>/node/<nid>/evernote/folders/',
             ],
@@ -54,6 +64,37 @@ api_routes = {
             views.evernote_folder_list,
             json_renderer,
         ),
+
+        Rule(
+            [
+                '/project/<pid>/evernote/widget/',
+                '/project/<pid>/node/<nid>/evernote/widget/',
+            ],
+            'get',
+            views.evernote_widget,
+            json_renderer,
+        ),
+
+        Rule(
+            [
+                '/project/<pid>/evernote/notes/',
+                '/project/<pid>/node/<nid>/evernote/notes/',
+            ],
+            'get',
+            views.evernote_notes,
+            json_renderer,
+        ),
+
+        Rule(
+            [
+                '/project/<pid>/evernote/note/',
+                '/project/<pid>/evernote/note/<noteid>/',
+            ],
+            'get',
+            views.evernote_note,
+            json_renderer,
+        ),
+
 
 
     ],

@@ -7,7 +7,7 @@ from tests.base import ApiTestCase
 from tests.factories import (
     ProjectFactory,
     RegistrationFactory,
-    AuthUserFactory
+    AuthUserFactory,
 )
 
 
@@ -62,9 +62,3 @@ class TestNodeRegistrationList(ApiTestCase):
         assert_equal(urlparse(url).path, '/{}nodes/{}/'.format(API_BASE, self.project._id))
         assert_equal(res.content_type, 'application/vnd.api+json')
         assert_equal(res.json['data'][0]['type'], 'registrations')
-
-    def test_return_private_registrations_logged_in_non_contributor(self):
-        res = self.app.get(self.private_url, auth=self.user_two.auth, expect_errors=True)
-        assert_equal(res.status_code, 403)
-        assert 'detail' in res.json['errors'][0]
-

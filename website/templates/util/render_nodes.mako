@@ -6,7 +6,6 @@
                     "tpl": "util/render_node.mako",
                     "uri": "${each['api_url']}get_summary/",
                     "view_kwargs": {
-                        "rescale_ratio": ${rescale_ratio},
                         "primary": ${int(each['primary'])},
                         "link_id": "${each['id']}",
                         "uid": "${user_id}",
@@ -25,7 +24,7 @@
               $('.sortable').sortable({
                   containment: '#containment',
                   tolerance: 'pointer',
-                  items: '#components > li',
+                  items: '#render-node > li',
                   stop: function(event, ui){
                       var sortListElm = this;
                       var idList = $(sortListElm).sortable(

@@ -1,5 +1,5 @@
 <h2 style="padding-bottom: 30px;">${ meeting['name'] }
-    ${meeting['field_names']['meeting_title_type'] if meeting['poster'] and meeting['talk'] else 'Posters' if meeting['poster'] else 'Talks'}
+    ${meeting['field_names']['meeting_title_type'] if meeting['poster'] and meeting['talk'] else meeting['field_names']['submission1_plural'].capitalize() if meeting['poster'] else meeting['field_names']['submission2_plural'].capitalize()}
 </h2>
 
 % if meeting['logo_url']:
@@ -12,7 +12,7 @@
         <a id="addLink" onclick="" href="#">${('Add your ' + meeting['field_names']['add_submission']) if meeting['poster'] and meeting['talk'] else ('Add your ' + meeting['field_names']['submission1_plural']) if meeting['poster'] else ('Add your ' + meeting['field_names']['submission2_plural'])}</a>
 
         % if meeting['info_url']:
-          | <a href="${ meeting['info_url'] }" target="_blank">Conference homepage <i class="fa fa-sm fa fa-external-link"></i></a>
+          | <a href="${ meeting['info_url'] }">Conference homepage <i class="fa fa-sm fa fa-external-link"></i></a>
         % endif
     </div>
 
@@ -47,7 +47,12 @@
             such as uploading additional files, to your project at that URL. If you
             didn't have an OSF account, one will be created automatically and a link
             to set your password will be emailed to you; if you do, we will simply create
-            a new project in your account.
+            a new project in your account. By creating an account you agree to our
+            <a href="https://github.com/CenterForOpenScience/centerforopenscience.org/blob/master/TERMS_OF_USE.md">Terms</a>
+            and that you have read our
+            <a href="https://github.com/CenterForOpenScience/centerforopenscience.org/blob/master/PRIVACY_POLICY.md">Privacy Policy</a>,
+            including our information on
+            <a href="https://github.com/CenterForOpenScience/centerforopenscience.org/blob/master/PRIVACY_POLICY.md#f-cookies">Cookie Use</a>.
         </p>
     </div>
 % endif

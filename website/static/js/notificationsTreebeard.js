@@ -76,6 +76,11 @@ function displayParentNotificationType(item){
     return '';
 }
 
+var tooltipConfig = function(element, isInit) {
+    if (!isInit) {
+        $(element).tooltip();
+    }
+};
 
 function ProjectNotifications(data) {
 
@@ -84,6 +89,10 @@ function ProjectNotifications(data) {
         divID: 'grid',
         filesData: data,
         naturalScrollLimit : 0,
+        onload : function () {
+            var tb = this;
+            expandOnLoad.call(tb);
+        },
         resolveRows: function notificationResolveRows(item){
             var columns = [];
             var iconcss = '';
@@ -102,7 +111,7 @@ function ProjectNotifications(data) {
                             return m('div[style="padding-left:5px"]',
                                         [m ('p', [
                                                 m('b', item.data.node.title + ': '),
-                                                m('span[class="text-warning"]', ' No configured projects.')]
+                                                m('span[class="text-muted"]', ' No configured projects.')]
                                         )]
                             );
                         }
@@ -114,11 +123,17 @@ function ProjectNotifications(data) {
                         filter : true,
                         sortInclude : false,
                         custom : function() {
-                            return m('div[style="padding-left:5px"]',
-                                    [m('p',
-                                        [m('b', item.data.node.title + ':')]
-                                )]
-                            );
+                            return m('div[style="padding-left:5px; padding-bottom:50px"]', [
+                                m('p', [
+                                    m('b', item.data.node.title + ':  '),
+                                        m('span[class="fa fa-info-circle"]', {
+                                            'data-toggle': 'tooltip',
+                                            'title':item.data.node.help,
+                                            'config': tooltipConfig,
+                                            'data-placement': 'bottom'
+                                        })
+                                ])
+                            ]);
                         }
                     });
                 }
@@ -210,7 +225,6 @@ function ProjectNotifications(data) {
         }
     });
     var grid = new Treebeard(tbOptions);
-    expandOnLoad.call(grid.tbController);
 }
 
 module.exports = ProjectNotifications;

@@ -13,23 +13,29 @@ function Meetings(data) {
         paginateToggle : false, // Show the buttons that allow users to switch between scroll and paginate.
         uploads : false,         // Turns dropzone on/off.
         columnTitles : function() {
-             return [
+            return [
                 {
                     title: 'Name',
-                    width: '50%',
+                    width: '45%',
                     sortType : 'text',
                     sort : true
                 },
                 {
-                     title: 'Submissions',
-                     width : '25%',
-                     sortType : 'number',
-                     sort : true
+                    title: 'Submissions',
+                    width : '15%',
+                    sortType : 'number',
+                    sort : true
                 },
                 {
-                    title: 'Accepting submissions',
-                    width: '25%',
-                    sortType: 'text',
+                    title: 'Location',
+                    width : '20%',
+                    sortType : 'text',
+                    sort : true
+                },
+                {
+                    title: 'Date',
+                    width: '20%',
+                    sortType: 'date',
                     sort: true
                 }
             ];
@@ -39,17 +45,42 @@ function Meetings(data) {
                 {
                     data : 'name',  // Data field name
                     sortInclude : true,
+                    filter : true,
                     custom : function() { return m('a', { href : item.data.url, target : '_blank' }, item.data.name ); }
 
                 },
                 {
                     data: 'count',
-                    sortInclude: true
+                    sortInclude: true,
+                    custom: function(){
+                        return m('span.text-center', item.data.count );
+                    }
                 },
                 {
-                    data: 'active', // Data field name
-                    sortInclude: true,
-                    custom: function() { return item.data.active ? 'Yes' : 'No'; }
+                    data: 'location',
+                    sortInclude : true,
+                    custom : function() {
+                        return item.data.location; }
+                },
+                {
+                    data: 'start_date', // Data field name
+                    sortInclude : true,
+                    custom: function() {
+                        if (item.data.start_date === null && item.data.end_date === null){
+                            return;
+                        }
+                        if (item.data.start_date === null) {
+                            return item.data.end_date;
+                        }
+                        if (item.data.end_date === null) {
+                            return item.data.start_date;
+                        }
+                        if (item.data.end_date === item.data.start_date) {
+                            return item.data.end_date;
+                        }
+                        return item.data.start_date + ' - ' + item.data.end_date;
+                    },
+                    filter : false
                 }
             ];
         },
@@ -58,7 +89,7 @@ function Meetings(data) {
             down : 'i.fa.fa-chevron-down'
         },
         hScroll: 'auto',
-        showFilter : false,     // Gives the option to filter by showing the filter box.
+        showFilter : true,     // Gives the option to filter by showing the filter box.
         allowMove : false,       // Turn moving on or off.
         hoverClass : 'fangorn-hover',
     };

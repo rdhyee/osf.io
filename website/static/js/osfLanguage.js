@@ -4,6 +4,7 @@ var SUPPORT_LINK = '<a href="mailto:' + SUPPORT_EMAIL + '">' + SUPPORT_EMAIL +'<
 var REFRESH_OR_SUPPORT = 'Please refresh the page and try again or contact ' + SUPPORT_LINK + ' if the problem persists.';
 
 module.exports = {
+    REFRESH_OR_SUPPORT: REFRESH_OR_SUPPORT,
     SUPPORT_LINK: SUPPORT_LINK,
     // TODO
     makePublic: null,
@@ -12,12 +13,15 @@ module.exports = {
         registrationFailed: 'Registration failed. If this problem persists, please contact ' + SUPPORT_EMAIL + '.',
         invalidEmbargoTitle: 'Invalid embargo end date',
         invalidEmbargoMessage: 'Please choose a date more than two days, but less than four years, from today.',
-        registerConfirm: 'Are you sure you want to register this project?',
+        registerConfirm: 'Before you continue...',
         registerSkipAddons: 'If you choose to continue with the registration at this time we will exclude the contents of any addons that are not copyable. These files will not appear in the final registration.',
-        registerFail: 'There was a problem completing your registration right now. Please try again later. If this should not have occurred and the issue persists, please report it to ' + SUPPORT_LINK,
-        submitForReviewFail: 'There was a problem submitting this draft for review right now. Please try again later. If this should not have occurred and the issue persists, please report it to ' + SUPPORT_LINK,
+        registerFail: 'There was a problem completing your registration. Please try again later. If this should not have occurred and the issue persists, please report it to ' + SUPPORT_LINK + '.',
+        submitForReviewFail: 'There was a problem submitting this draft for review right now. Please try again later. If this should not have occurred and the issue persists, please report it to ' + SUPPORT_LINK + '.',
         beforeEditIsApproved: 'This draft registration is currently approved. Please note that if you make any changes (excluding comments) this approval status will be revoked and you will need to submit for approval again.',
-        beforeEditIsPendingReview: 'This draft registration is currently pending review. Please note that if you make any changes (excluding comments) this request will be cancelled and you will need to submit for approval again.'
+        beforeEditIsPendingReview: 'This draft registration is currently pending review. Please note that if you make any changes (excluding comments) this request will be cancelled and you will need to submit for approval again.',
+        loadDraftsFail: 'There was a problem loading draft registrations at this time. ' + REFRESH_OR_SUPPORT,
+        deleteDraftFail: 'There was a problem deleting this draft. ' + REFRESH_OR_SUPPORT,
+        loadMetaSchemaFail: 'There was a problem loading registration templates at this time. ' + REFRESH_OR_SUPPORT
     },
     Addons: {
         dataverse: {
@@ -67,10 +71,10 @@ module.exports = {
                 'This will revoke access to GitHub for all projects you have ' +
                 'associated with this account.',
         },
-        s3: {
-            confirmDeauth: 'Are you sure you want to disconnect the S3 account? ' +
-                'This will revoke access to S3 for all projects you have ' +
-                'associated with this account.',
+        s3:{
+            authError: 'Could not connect to Amazon S3 at this time. Please try again later.',
+            userSettingsError: 'Could not retrieve settings. Please refresh the page or ' +
+                'contact ' + SUPPORT_LINK + ' if the problem persists.',
         },
         googledrive: {
           // Shown on clicking "Delete Access Token" for googledrive

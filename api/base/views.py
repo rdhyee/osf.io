@@ -1,11 +1,21 @@
+import weakref
 from django.http import JsonResponse
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import generics
+# from rest_framework.serializers
+from rest_framework.mixins import ListModelMixin
 
 from api.users.serializers import UserSerializer
-from website import settings
-from .utils import absolute_reverse
+
+from django.conf import settings as django_settings
+from .utils import absolute_reverse, is_truthy
+
+from .requests import EmbeddedRequest
+
+
+CACHE = weakref.WeakKeyDictionary()
+
 
 class JSONAPIBaseView(generics.GenericAPIView):
 
@@ -23,40 +33,106 @@ class JSONAPIBaseView(generics.GenericAPIView):
         results for
         :return function object -> dict:
         """
+        if getattr(field, 'field', None):
+            field = field.field
         def partial(item):
             # resolve must be implemented on the field
-            view, view_args, view_kwargs = field.resolve(item)
+            v, view_args, view_kwargs = field.resolve(item, field_name)
+            if not v:
+                return None
+            if isinstance(self.request._request, EmbeddedRequest):
+                request = self.request._request
+            else:
+                request = EmbeddedRequest(self.request)
+
             view_kwargs.update({
-                'request': self.request,
+                'request': request,
                 'is_embedded': True
             })
-            response = view(*view_args, **view_kwargs)
-            return response.data
+
+            # Setup a view ourselves to avoid all the junk DRF throws in
+            # v is a function that hides everything v.cls is the actual view class
+            view = v.cls()
+            view.args = view_args
+            view.kwargs = view_kwargs
+            view.request = request
+            view.request.parser_context['kwargs'] = view_kwargs
+            view.format_kwarg = view.get_format_suffix(**view_kwargs)
+
+            _cache_key = (v.cls, field_name, view.get_serializer_class(), item)
+            if _cache_key in CACHE.setdefault(self.request._request, {}):
+                # We already have the result for this embed, return it
+                return CACHE[self.request._request][_cache_key]
+
+            # Cache serializers. to_representation of a serializer should NOT augment it's fields so resetting the context
+            # should be sufficient for reuse
+            if not view.get_serializer_class() in CACHE.setdefault(self.request._request, {}):
+                CACHE[self.request._request][view.get_serializer_class()] = view.get_serializer_class()(many=isinstance(view, ListModelMixin))
+            ser = CACHE[self.request._request][view.get_serializer_class()]
+
+            try:
+                ser._context = view.get_serializer_context()
+
+                if not isinstance(view, ListModelMixin):
+                    ret = ser.to_representation(view.get_object())
+                else:
+                    queryset = view.filter_queryset(view.get_queryset())
+                    page = view.paginate_queryset(queryset)
+
+                    ret = ser.to_representation(page or queryset)
+
+                    if page is not None:
+                        request.parser_context['view'] = view
+                        request.parser_context['kwargs'].pop('request')
+                        view.paginator.request = request
+                        ret = view.paginator.get_paginated_response(ret).data
+            except Exception as e:
+                ret = view.handle_exception(e).data
+
+            # Allow request to be gc'd
+            ser._context = None
+
+            # Cache our final result
+            CACHE[self.request._request][_cache_key] = ret
+
+            return ret
+
         return partial
 
     def get_serializer_context(self):
         """Inject request into the serializer context. Additionally, inject partial functions
-        (request, object -> embed items) if the query string contains embeds, and this
-        is the topmost call to this method (the embed partials call view functions which has
-        the potential to create infinite recursion hence the inclusion of the is_embedded
-        view kwarg to prevent this).
+        (request, object -> embed items) if the query string contains embeds.  Allows
+         multiple levels of nesting.
         """
         context = super(JSONAPIBaseView, self).get_serializer_context()
         if self.kwargs.get('is_embedded'):
-            return context
-        embeds = self.request.query_params.getlist('embed')
-        fields = self.serializer_class._declared_fields
-        for field in fields:
-            if getattr(fields[field], 'always_embed', False) and field not in embeds:
+            embeds = []
+        else:
+            embeds = self.request.query_params.getlist('embed')
+
+        fields_check = self.serializer_class._declared_fields.copy()
+
+        for field in fields_check:
+            if getattr(fields_check[field], 'field', None):
+                fields_check[field] = fields_check[field].field
+
+        for field in fields_check:
+            if getattr(fields_check[field], 'always_embed', False) and field not in embeds:
                 embeds.append(unicode(field))
-            if getattr(fields[field], 'never_embed', False) and field in embeds:
+            if getattr(fields_check[field], 'never_embed', False) and field in embeds:
                 embeds.remove(field)
         embeds_partials = {}
         for embed in embeds:
-            embed_field = fields.get(embed)
+            embed_field = fields_check.get(embed)
             embeds_partials[embed] = self._get_embed_partial(embed, embed_field)
+
         context.update({
-            'embed': embeds_partials
+            'enable_esi': (
+                is_truthy(self.request.query_params.get('esi', django_settings.ENABLE_ESI)) and
+                self.request.accepted_renderer.media_type in django_settings.ESI_MEDIA_TYPES
+            ),
+            'embed': embeds_partials,
+            'envelope': self.request.query_params.get('envelope', 'data'),
         })
         return context
 
@@ -122,6 +198,14 @@ def root(request, format=None):
     Boolean fields should be queried with `true` or `false`.
 
         /nodes/?filter[registered]=true
+
+    You can request multiple resources by filtering on id and placing comma-separated values in your query parameter.
+
+        /nodes/?filter[id]=aegu6,me23a
+
+    You can filter with case-sensitivity or case-insensitivity by using `contains` and `icontains`, respectively.
+
+        /nodes/?filter[tags][icontains]=help
 
     ###Embedding
 
@@ -328,7 +412,7 @@ def root(request, format=None):
     ###OSF Node Categories
 
         value                 description
-        ------------------------------------------
+        ==========================================
         project               Project
         hypothesis            Hypothesis
         methods and measures  Methods and Measures
@@ -342,7 +426,7 @@ def root(request, format=None):
     ###OSF Node Permission keys
 
         value        description
-        ------------------------------------------
+        ==========================================
         read         Read-only access
         write        Write access (make changes, cannot delete)
         admin        Admin access (full write, create, delete, contributor add)
@@ -352,7 +436,7 @@ def root(request, format=None):
     Valid storage providers are:
 
         value        description
-        ------------------------------------------
+        ==========================================
         box          Box.com
         cloudfiles   Rackspace Cloud Files
         dataverse    Dataverse
@@ -379,10 +463,13 @@ def root(request, format=None):
         'links': {
             'nodes': absolute_reverse('nodes:node-list'),
             'users': absolute_reverse('users:user-list'),
+            'collections': absolute_reverse('collections:collection-list'),
+            'registrations': absolute_reverse('registrations:registration-list'),
+            'institutions': absolute_reverse('institutions:institution-list'),
+            'licenses': absolute_reverse('licenses:license-list'),
+            'metaschemas': absolute_reverse('metaschemas:metaschema-list'),
         }
     }
-    if settings.DEV_MODE:
-        return_val["links"]["collections"] = absolute_reverse('collections:collection-list')
 
     return Response(return_val)
 

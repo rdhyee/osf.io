@@ -2,7 +2,6 @@
 Custom exceptions for add-ons.
 """
 
-
 class AddonError(Exception):
     pass
 

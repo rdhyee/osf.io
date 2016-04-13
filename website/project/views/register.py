@@ -55,6 +55,11 @@ def node_register_page(auth, node, **kwargs):
 
 @must_be_valid_project
 @must_have_permission(ADMIN)
+def node_registration_retraction_redirect(auth, node, **kwargs):
+    return redirect(node.web_url_for('node_registration_retraction_get', _guid=True))
+
+@must_be_valid_project
+@must_have_permission(ADMIN)
 def node_registration_retraction_get(auth, node, **kwargs):
     """Prepares node object for registration retraction page.
 
@@ -65,12 +70,12 @@ def node_registration_retraction_get(auth, node, **kwargs):
     if not node.is_registration:
         raise HTTPError(http.BAD_REQUEST, data={
             'message_short': 'Invalid Request',
-            'message_long': 'Retractions of non-registrations is not permitted.'
+            'message_long': 'Withdrawal of non-registrations is not permitted.'
         })
     if node.is_pending_retraction:
         raise HTTPError(http.BAD_REQUEST, data={
             'message_short': 'Invalid Request',
-            'message_long': 'This registration is already pending a retraction.'
+            'message_long': 'This registration is already pending withdrawal.'
         })
 
     return serialize_node(node, auth, primary=True)
@@ -86,25 +91,25 @@ def node_registration_retraction_post(auth, node, **kwargs):
     if node.is_pending_retraction:
         raise HTTPError(http.BAD_REQUEST, data={
             'message_short': 'Invalid Request',
-            'message_long': 'This registration is already pending retraction'
+            'message_long': 'This registration is already pending withdrawal'
         })
     if not node.is_registration:
         raise HTTPError(http.BAD_REQUEST, data={
             'message_short': 'Invalid Request',
-            'message_long': 'Retractions of non-registrations is not permitted.'
+            'message_long': 'Withdrawal of non-registrations is not permitted.'
         })
 
     if node.root is not node:
         raise HTTPError(http.BAD_REQUEST, data={
             'message_short': 'Invalid Request',
-            'message_long': 'Retraction of non-parent registrations is not permitted.'
+            'message_long': 'Withdrawal of non-parent registrations is not permitted.'
         })
 
     data = request.get_json()
     try:
         node.retract_registration(auth.user, data.get('justification', None))
         node.save()
-        node.retraction.ask(node.active_contributors())
+        node.retraction.ask(node.get_active_contributors_recursive(unique_users=True))
     except NodeStateError as err:
         raise HTTPError(http.FORBIDDEN, data=dict(message_long=err.message))
 

@@ -140,16 +140,17 @@ def wiki_widget(**kwargs):
     wiki = node.get_addon('wiki')
     wiki_page = node.get_wiki_page('home')
 
-    more = False
+    # Show "Read more" link if there are multiple pages or has > 400 characters
+    more = len(node.wiki_pages_current.keys()) >= 2
+    MAX_DISPLAY_LENGTH = 400
     use_python_render = False
     if wiki_page and wiki_page.html(node):
         wiki_html = wiki_page.html(node)
-        if len(wiki_html) > 500:
-            wiki_html = BeautifulSoup(wiki_html[:500] + '...', 'html.parser')
+        if len(wiki_html) > MAX_DISPLAY_LENGTH:
+            wiki_html = BeautifulSoup(wiki_html[:MAX_DISPLAY_LENGTH] + '...', 'html.parser')
             more = True
         else:
             wiki_html = BeautifulSoup(wiki_html)
-            more = False
         use_python_render = wiki_page.rendered_before_update
     else:
         wiki_html = None
@@ -258,12 +259,6 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
     except InvalidVersionError:
         raise WIKI_INVALID_VERSION_ERROR
 
-    # Default versions for view and compare
-    version_settings = {
-        'view': view or ('preview' if 'edit' in panels_used else 'current'),
-        'compare': compare or 'previous',
-    }
-
     # ensure home is always lower case since it cannot be renamed
     if wiki_name.lower() == 'home':
         wiki_name = 'home'
@@ -291,6 +286,16 @@ def project_wiki_view(auth, wname, path=None, **kwargs):
                 raise HTTPError(http.UNAUTHORIZED)
             raise HTTPError(http.FORBIDDEN)
         sharejs_uuid = None
+
+    # Opens 'edit' panel when home wiki is empty
+    if not content and can_edit and wiki_name == 'home':
+        panels_used.append('edit')
+
+    # Default versions for view and compare
+    version_settings = {
+        'view': view or ('preview' if 'edit' in panels_used else 'current'),
+        'compare': compare or 'previous',
+    }
 
     ret = {
         'wiki_id': wiki_page._primary_key if wiki_page else None,

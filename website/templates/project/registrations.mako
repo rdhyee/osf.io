@@ -14,7 +14,7 @@
 <div class="tab-content registrations-view">
   <div role="tabpanel" class="tab-pane active" id="registrations">
     <div class="row" style="min-height: 150px; padding-top:20px;">
-      <div class="col-md-9">
+      <div class="col-xs-9 col-sm-8">
         % if node["registration_count"]:
         <div mod-meta='{
             "tpl": "util/render_nodes.mako",
@@ -31,10 +31,10 @@
     ##      %endif
         % else:
         <p>
-          There have been no completed registrations of this ${node['node_type']}.
-          For a list of the most viewed and most recent public registrations on the
-          Open Science Framework, click <a href="/explore/activity/#newPublicRegistrations">here</a>,
-          or you start a new draft registration from the "Draft Registrations" tab.
+          There have been no completed registrations of this project. For a list of the most viewed and most recent public registrations on the Open Science Framework, click <a href="/explore/activity/#newPublicRegistrations">here</a>.
+          % if 'admin' in user['permissions']:
+          You can start a new registration by clicking the “New registration” button, and you have the option of saving as a draft registration before submission.
+          % endif
         </p>
         % endif
         %if parent_node['exists'] and user['is_admin_parent']:
@@ -44,9 +44,9 @@
         %endif
       </div>
       % if 'admin' in user['permissions'] and not disk_saving_mode:
-      <div class="col-md-3">
-        <a id="registerNode" class="btn btn-default" type="button">
-          New Registration
+      <div class="col-xs-3 col-sm-4">
+        <a id="registerNode" class="btn btn-success disabled" type="button">
+          Loading ...
         </a>
       </div>
       % endif
@@ -54,7 +54,7 @@
   </div>
   <div role="tabpanel" class="tab-pane" id="drafts">
     <div id="draftRegistrationsScope" class="row scripted" style="min-height: 150px;padding-top:20px;">
-      <div data-bind="visible: loading" class="spinner-loading-wrapper">
+      <div data-bind="visible: loadingDrafts" class="spinner-loading-wrapper">
         <div class="logo-spin logo-lg"></div>
       </div>
       <form id="newDraftRegistrationForm" method="POST" style="display:none">
@@ -69,9 +69,9 @@
             <li class="project list-group-item list-group-item-node">
               <h4 data-bind="text: schema().title" ></h4>
               <h4 class="list-group-item-heading">
-                <div class="progress progress-bar-md">
+                <div data-bind="visible: hasRequiredQuestions" class="progress progress-bar-md">
                   <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
-                       data-bind="attr.aria-completion: completion,
+                       data-bind="attr: {'aria-completion': completion},
                                   style: {width: completion() + '%'}">
                     <span class="sr-only"></span>
                   </div>
@@ -81,27 +81,40 @@
                 <p>Started: <span data-bind="text: initiated"></span></p>
                 <p>Last updated: <span data-bind="text: updated"></span></p>
                 <span data-bind="if: requiresApproval">
-                    <div data-bind="if: isApproved">
-                        <div class="draft-status-badge bg-success"> Approved</div>
-                    </div>
-                    <div data-bind="ifnot: isApproved">
-                        <div class="draft-status-badge bg-warning"> Pending Approval </div>
-                    </div>
-                    <div data-bind="if: isPendingReview">
+                    <div data-bind="if: isPendingApproval">
                         <div class="draft-status-badge bg-warning"> Pending Review</div>
+                    </div>
+                    <div data-bind="if: userHasUnseenComment">
+                        <div class="draft-status-badge bg-warning"> Unseen Comments</div>
                     </div>
                 </span>
                 </small>
                 <div class="row">
                   <div class="col-md-10">
                     <a class="btn btn-info"
-                       data-bind="click: $root.editDraft"><i style="margin-right: 5px;" class="fa fa-pencil"></i>Edit</a>
+                       data-bind="visible: !isPendingApproval,
+                                  click: $root.editDraft">
+                      <i style="margin-right: 5px;" class="fa fa-pencil"></i>Edit
+                    </a>
+                    <a class="btn btn-info"
+                       data-bind="visible: isPendingApproval,
+                                  click: $root.previewDraft">
+                      <i style="margin-right: 5px;" class="fa fa-pencil"></i>Preview
+                    </a>
                     <button class="btn btn-danger"
-                            data-bind="click: $root.deleteDraft"><i style="margin-right: 5px;" class="fa fa-times"></i>Delete</button>
+                            data-bind="click: $root.deleteDraft.bind($root)">
+                      <i style="margin-right: 5px;" class="fa fa-times"></i>Delete
+                    </button>
                   </div>
                   <div class="col-md-1">
-                     <a class="btn btn-success" data-bind="attr.href: urls.register_page,
-                                                           css: {'disabled': !isApproved}">Register</a>
+                    <!-- TODO(samchrisinger): pin down behavior here
+                    <span data-bind="if: requiresApproval">
+                      <button id="register-submit" type="button" class="btn btn-primary pull-right" data-toggle="tooltip" data-placement="top" title="Not eligible for the Pre-Registration Challenge" data-bind="click: registerWithoutReview">Register without review</button>
+                    </span>
+                    -->
+                    <span data-bind="ifnot: requiresApproval">
+                     <a class="btn btn-success" data-bind="attr: {href: urls.register_page}">Register</a>
+                    </span>
                   </div>
                 </div>
               </h4>
@@ -114,12 +127,12 @@
 </div>
 </div>
 <script type="text/html" id="createDraftRegistrationModal">
-    <p>Registration creates a frozen version of the project that can never be edited or deleted but can be retracted. Your original project remains editable but will now have the registration linked to it. Things to know about registration:</p>
+    <p>Registration creates a frozen version of the project that can never be edited or deleted but can be withdrawn. Your original project remains editable but will now have the registration linked to it. Things to know about registration:</p>
     <ul>
         <li>Ensure your project is in the state you wish to freeze before registering.</li>
         <li>Consider turning links into forks.</li>
         <li>Registrations can have embargo periods for up to four years. If you choose an embargo period, the registration will automatically become public when the embargo expires.</li>
-        <li>Retracting a registration removes the contents of the registrations but will leave behind a log showing when the registration was created and retracted.</li>
+        <li>Withdrawing a registration removes the contents of the registrations but will leave behind a log showing when the registration was created and withdrawn.</li>
     </ul>
 
     <p>Continue your registration by selecting a registration form:</p>
@@ -128,7 +141,7 @@
         <label>
           <input type="radio" name="selectedDraftSchema"
                  data-bind="attr {value: id}, checked: $root.selectedSchemaId" />
-          {{ schema.title }}
+          <span data-bind="text: schema.title"></span>
           <!-- ko if: schema.description -->
           <i data-bind="tooltip: {title: schema.description}" class="fa fa-info-circle"> </i>
           <!-- /ko -->
@@ -143,3 +156,4 @@
 </%def>
 
 <%include file="project/registration_preview.mako" />
+<%include file="project/registration_utils.mako" />

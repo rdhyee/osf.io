@@ -4,19 +4,26 @@ import httplib as http
 from framework.auth.decorators import must_be_logged_in
 from framework.exceptions import HTTPError, PermissionsError
 
+from website.addons.base import generic_views
 from website.addons.evernote import utils
 from website.addons.evernote.serializer import EvernoteSerializer
 from website.oauth.models import ExternalAccount
 from website.util import permissions
 from website.project.decorators import (
+    must_be_contributor_or_public,
     must_have_addon,
     must_be_addon_authorizer,
     must_not_be_registration,
     must_have_permission
 )
 
+import ENML2HTML
+
 import logging
 logger = logging.getLogger(__name__)
+
+SHORT_NAME = 'evernote'
+FULL_NAME = 'Evernote'
 
 @must_be_logged_in
 def evernote_get_user_settings(auth):
@@ -91,6 +98,54 @@ def evernote_add_user_auth(auth, node_addon, user_addon, **kwargs):
         'message': 'Successfully imported access token from profile.',
     }
 
+
+evernote_deauthorize_node = generic_views.deauthorize_node(
+    SHORT_NAME
+)
+
+@must_have_addon('evernote', 'node')
+@must_be_addon_authorizer('evernote')
+def evernote_notes(node_addon, **kwargs):
+
+    token = node_addon.external_account.oauth_key
+    client = utils.get_evernote_client(token)
+
+    # will want to pick up notes for the notebook
+    # start with calculating the number of notes in nb
+
+    notes = utils.notes_metadata(client,
+                    notebookGuid=node_addon.folder_id,
+                    includeTitle=True,
+                    includeUpdated=True,
+                    includeCreated=True)
+
+    results = [{'title': note.title,
+              'guid': note.guid,
+              'created': utils.timestamp_iso(note.created),
+              'updated': utils.timestamp_iso(note.updated)}
+              for note in notes]
+
+    return results
+
+@must_have_addon('evernote', 'node')
+@must_be_addon_authorizer('evernote')
+def evernote_note(node_addon, noteid, **kwargs):
+
+    token = node_addon.external_account.oauth_key
+    client = utils.get_evernote_client(token)
+    note = utils.get_note(client, noteid,
+        withContent=True,
+        withResourcesData=False)
+
+    # convert to HTML
+    mediaStore = utils.MyMediaStore(client.get_note_store(), note.guid)
+    html = ENML2HTML.ENMLToHTML(note.content, pretty=True, header=False,
+          media_store=mediaStore)
+
+    return {'noteid': noteid,
+            'content': note.content,
+            'html': html}
+
 @must_have_addon('evernote', 'node')
 @must_be_addon_authorizer('evernote')
 def evernote_folder_list(node_addon, **kwargs):
@@ -141,3 +196,20 @@ def evernote_folder_list(node_addon, **kwargs):
         } for notebook in notebooks]
     else:
         return []
+
+@must_be_contributor_or_public
+@must_have_addon('evernote', 'node')
+def evernote_widget(node_addon, **kwargs):
+    """Collects and serializes settting needed to build the widget."""
+
+    #provider = ZoteroCitationsProvider()
+    #return provider.widget(node_addon)
+
+    ret = node_addon.config.to_json()
+    ret.update({
+        'complete': node_addon.complete,
+        'folder_id': node_addon.folder_id,
+        'folder_name': node_addon.folder_name
+    })
+
+    return ret

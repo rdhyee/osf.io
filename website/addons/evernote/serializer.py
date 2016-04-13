@@ -3,6 +3,8 @@ from website.util import api_url_for, web_url_for
 
 class EvernoteSerializer(OAuthAddonSerializer):
 
+    addon_short_name = 'evernote'
+
     def serialize_settings(self, node_settings, current_user, client=None):
         """View helper that returns a dictionary representation of a
         EvernoteNodeSettings record. Provides the return value for the
@@ -61,8 +63,10 @@ class EvernoteSerializer(OAuthAddonSerializer):
             'importAuth': node.api_url_for('evernote_add_user_auth'),
             'folders': node.api_url_for('evernote_folder_list'),
             'config': node.api_url_for('evernote_set_config'),
+            'notes': node.api_url_for('evernote_notes'),
+            'note': node.api_url_for('evernote_note'),
             # 'files': node.web_url_for('collect_file_trees'),
-            # 'deauthorize': node.api_url_for('evernote_remove_user_auth'),
             #'share': 'https://app.box.com/files/0/f/{0}'.format(self.node_settings.folder_id),
+            'deauthorize': node.api_url_for('evernote_deauthorize_node'),
             'accounts': node.api_url_for('evernote_get_user_settings'),
         }

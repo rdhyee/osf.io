@@ -5,8 +5,6 @@ var $ = require('jquery');
 var ko = require('knockout');
 var bootbox = require('bootbox');
 require('knockout.validation');
-require('knockout.punches');
-ko.punches.enableAll();
 require('knockout-sortable');
 
 var $osf = require('./osfHelpers');
@@ -20,7 +18,16 @@ var socialRules = {
     twitter: /twitter\.com\/(\w+)/i,
     linkedIn: /.*\/?(in\/.*|profile\/.*|pub\/.*)/i,
     impactStory: /impactstory\.org\/([\w\.-]+)/i,
-    github: /github\.com\/(\w+)/i
+    github: /github\.com\/(\w+)/i,
+    researchGate: /researchgate\.net\/profile\/(\w+)/i,
+    academia: /(\w+)\.academia\.edu\/(\w+)/i,
+    baiduScholar: /xueshu\.baidu\.com\/scholarID\/(\w+)/i,
+    url: '^(https?:\\/\\/)?'+ // protocol
+            '((([a-z\\d]([a-z\\d-]*[a-z\\d])*)\\.)+[a-z]{2,}|'+ // domain name
+            '((\\d{1,3}\\.){3}\\d{1,3}))'+ // OR ip (v4) address
+            '(\\:\\d+)?(\\/[-a-z\\d%_.~+]*)*'+ // port and path
+            '(\\?[;&a-z\\d%_.~+=-]*)?'+ // query string
+            '(\\#[-a-z\\d_]*)?$'
 };
 
 var cleanByRule = function(rule) {
@@ -211,7 +218,7 @@ var BaseViewModel = function(urls, modes, preventUnsaved) {
     self.editAllowed = $.inArray('edit', self.modes) >= 0;
     self.editable = ko.observable(self.editAllowed);
     self.mode = ko.observable(self.editable() ? 'edit' : 'view');
-
+    self.saving = ko.observable(false);
     self.original = ko.observable();
     self.tracked = [];  // Define for each view model that inherits
 
@@ -261,6 +268,7 @@ BaseViewModel.prototype.changeMessage = function(text, css, timeout) {
 };
 
 BaseViewModel.prototype.handleSuccess = function() {
+    this.saving(false);
     if ($.inArray('view', this.modes) >= 0) {
         this.mode('view');
     } else {
@@ -273,6 +281,7 @@ BaseViewModel.prototype.handleSuccess = function() {
 };
 
 BaseViewModel.prototype.handleError = function(response) {
+    this.saving(false);
     var defaultMsg = 'Could not update settings';
     var msg = response.message_long || defaultMsg;
     this.changeMessage(
@@ -337,6 +346,7 @@ BaseViewModel.prototype.cancel = function(data, event) {
 
 BaseViewModel.prototype.submit = function() {
     if (this.hasValidProperty() && this.isValid()) {
+        this.saving(true);
         $osf.putJSON(
             this.urls.crud,
             this.serialize()
@@ -350,7 +360,6 @@ BaseViewModel.prototype.submit = function() {
     } else {
         this.showMessages(true);
     }
-
 };
 
 var NameViewModel = function(urls, modes, preventUnsaved, fetchCallback) {
@@ -494,8 +503,12 @@ var SocialViewModel = function(urls, modes) {
 
     self.addons = ko.observableArray();
 
+    self.profileWebsite = ko.observable('').extend({
+        ensureHttp: true
+    });
+
     // Start with blank profileWebsite for new users without a profile.
-    self.profileWebsites = ko.observableArray(['']);
+    self.profileWebsites = ko.observableArray([self.profileWebsite]);
 
     self.hasProfileWebsites = ko.pureComputed(function() {
         //Check to see if any valid profileWebsites exist
@@ -506,6 +519,18 @@ var SocialViewModel = function(urls, modes) {
             }
         }
         return false;
+    });
+
+    self.hasValidWebsites = ko.pureComputed(function() {
+        //Check to see if there are bad profile websites
+        var profileWebsites = ko.toJS(self.profileWebsites());
+        var urlexp = new RegExp(socialRules.url,'i'); // fragment locator
+        for (var i=0; i<profileWebsites.length; i++) {
+            if (profileWebsites[i] && !urlexp.test(profileWebsites[i])) {
+                return false;
+            }
+        }
+        return true;
     });
 
     self.orcid = extendLink(
@@ -536,6 +561,23 @@ var SocialViewModel = function(urls, modes) {
         ko.observable().extend({trimmed: true, cleanup: cleanByRule(socialRules.github)}),
         self, 'github', 'https://github.com/'
     );
+    self.researchGate = extendLink(
+        ko.observable().extend({trimmed: true, cleanup: cleanByRule(socialRules.researchGate)}),
+        self, 'researchGate', 'https://researchgate.net/profile/'
+    );
+
+    self.academiaInstitution = extendLink(
+        ko.observable().extend({trimmed: true, cleanup: cleanByRule(socialRules.academia)}),
+        self, 'academiaInstitution', 'https://'
+    );
+    self.academiaProfileID = extendLink(
+        ko.observable().extend({trimmed: true, cleanup: cleanByRule(socialRules.academia)}),
+        self, 'academiaProfileID', '.academia.edu/'
+    );
+    self.baiduScholar = extendLink(
+        ko.observable().extend({trimmed: true, cleanup: cleanByRule(socialRules.baiduScholar)}),
+        self, 'baiduScholar', 'http://xueshu.baidu.com/scholarID/'
+    );
 
     self.trackedProperties = [
         self.profileWebsites,
@@ -545,7 +587,11 @@ var SocialViewModel = function(urls, modes) {
         self.scholar,
         self.linkedIn,
         self.impactStory,
-        self.github
+        self.github,
+        self.researchGate,
+        self.academiaInstitution,
+        self.academiaProfileID,
+        self.baiduScholar
     ];
 
     var validated = ko.validatedObservable(self);
@@ -562,7 +608,10 @@ var SocialViewModel = function(urls, modes) {
             {label: 'GitHub', text: self.github(), value: self.github.url()},
             {label: 'LinkedIn', text: self.linkedIn(), value: self.linkedIn.url()},
             {label: 'ImpactStory', text: self.impactStory(), value: self.impactStory.url()},
-            {label: 'Google Scholar', text: self.scholar(), value: self.scholar.url()}
+            {label: 'Google Scholar', text: self.scholar(), value: self.scholar.url()},
+            {label: 'ResearchGate', text: self.researchGate(), value: self.researchGate.url()},
+            {label: 'Academia', text: self.academiaInstitution() + '.academia.edu/' + self.academiaProfileID(), value: self.academiaInstitution.url() + self.academiaProfileID.url()},
+            {label: 'Baidu Scholar', text: self.baiduScholar(), value: self.baiduScholar.url()}
         ];
     });
 
@@ -584,7 +633,7 @@ var SocialViewModel = function(urls, modes) {
             ensureHttp: true
         }));
     };
-    
+
     self.removeWebsite = function(profileWebsite) {
         var profileWebsites = ko.toJS(self.profileWebsites());
             bootbox.confirm({
@@ -656,6 +705,33 @@ SocialViewModel.prototype.unserialize = function(data) {
     return self;
 };
 
+SocialViewModel.prototype.submit = function() {
+    if (!this.hasValidWebsites()) {
+        this.changeMessage(
+            'Please update your website',
+            'text-danger',
+            5000
+        );
+    }
+    else if (this.hasValidProperty() && this.isValid()) {
+        this.saving(true);
+        $osf.putJSON(
+            this.urls.crud,
+            this.serialize()
+        ).done(
+            this.handleSuccess.bind(this)
+        ).done(
+            this.setOriginal.bind(this)
+        ).fail(
+            this.handleError.bind(this)
+        ).always(
+            function() { this.saving(false); }
+        );
+    } else {
+        this.showMessages(true);
+    }
+};
+
 var ListViewModel = function(ContentModel, urls, modes) {
     var self = this;
     BaseViewModel.call(self, urls, modes);
@@ -699,6 +775,9 @@ var ListViewModel = function(ContentModel, urls, modes) {
     * */
     self.dirty = function() {
         // if the length of the list has changed
+        if (self.originalItems === undefined) {
+            return false;
+        }
         if (self.originalItems.length !== self.contents().length) {
             return true;
         }
@@ -749,13 +828,10 @@ ListViewModel.prototype = Object.create(BaseViewModel.prototype);
 ListViewModel.prototype.addContent = function() {
     if (!this.institutionObjectsEmpty() && this.isValid()) {
         this.contents.push(new this.ContentModel(this));
+        this.showMessages(false);
     }
     else {
-        this.changeMessage(
-            'Institution field is required.',
-            'text-danger',
-            5000
-        );
+        this.showMessages(true);
     }
 };
 
@@ -782,10 +858,10 @@ ListViewModel.prototype.removeContent = function(content) {
                 );
             }
         },
-        buttons:{
-            confirm:{
-                label:'Remove',
-                className:'btn-danger'
+        buttons: {
+            confirm: {
+                label: 'Remove',
+                className: 'btn-danger'
             }
         }
     });
@@ -793,7 +869,7 @@ ListViewModel.prototype.removeContent = function(content) {
 
 ListViewModel.prototype.unserialize = function(data) {
     var self = this;
-    if(self.editAllowed) {
+    if (self.editAllowed) {
         self.editable(data.editable);
     } else {
         self.editable(false);
@@ -803,8 +879,10 @@ ListViewModel.prototype.unserialize = function(data) {
     }));
 
     // Ensure at least one item is visible
-    if (self.contents().length === 0) {
-        self.addContent();
+    if (self.mode() === 'edit') {
+        if (self.contents().length === 0) {
+            self.addContent();
+        }
     }
 
     self.setOriginal();
@@ -842,11 +920,23 @@ var JobViewModel = function() {
         trimmed: true,
         required: {
             onlyIf: function() {
-               return !!self.department() || !!self.title();
+               return !!self.department() || !!self.title() || !!self.startYear() || !!self.endYear();
             },
             message: 'Institution/Employer required'
         }
     });
+
+    self.expandable = ko.computed(function() {
+        return self.department().length > 1 ||
+                self.title().length > 1 ||
+                self.startYear() !== null;
+    });
+
+    self.expanded = ko.observable(false);
+
+    self.toggle = function() {
+        self.expanded(!self.expanded());
+    };
 
     self.trackedProperties = [
         self.institution,
@@ -868,6 +958,7 @@ var JobViewModel = function() {
     self.isValid = ko.computed(function() {
         return validated.isValid();
     });
+
 };
 $.extend(JobViewModel.prototype, DateMixin.prototype, TrackedMixin.prototype);
 
@@ -883,11 +974,23 @@ var SchoolViewModel = function() {
         trimmed: true,
         required: {
             onlyIf: function() {
-                return !!self.department() || !!self.degree();
+                return !!self.department() || !!self.degree() || !!self.startYear() || !!self.endYear();
             },
             message: 'Institution required'
         }
     });
+
+    self.expandable = ko.computed(function() {
+        return self.department().length > 1 ||
+                self.degree().length > 1 ||
+                self.startYear() !== null;
+    });
+
+    self.expanded = ko.observable(false);
+
+    self.toggle = function() {
+        self.expanded(!self.expanded());
+    };
 
     self.trackedProperties = [
         self.institution,
@@ -909,6 +1012,7 @@ var SchoolViewModel = function() {
     self.isValid = ko.computed(function() {
         return validated.isValid();
     });
+
 };
 $.extend(SchoolViewModel.prototype, DateMixin.prototype, TrackedMixin.prototype);
 
@@ -958,5 +1062,8 @@ module.exports = {
     Jobs: Jobs,
     Schools: Schools,
     // Expose private viewmodels
-    _NameViewModel: NameViewModel
+    _NameViewModel: NameViewModel,
+    SocialViewModel: SocialViewModel,
+    BaseViewModel: BaseViewModel
 };
+
