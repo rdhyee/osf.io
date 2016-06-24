@@ -29,6 +29,7 @@ class GoogleDriveProvider(ExternalProvider):
     callback_url = '{}{}'.format(drive_settings.API_BASE_URL, 'oauth2/v3/token')
     auto_refresh_url = callback_url
     refresh_time = drive_settings.REFRESH_TIME
+    expiry_time = drive_settings.EXPIRY_TIME
 
     default_scopes = drive_settings.OAUTH_SCOPE
     _auth_client = GoogleAuthClient()
@@ -130,7 +131,7 @@ class GoogleDriveNodeSettings(StorageAddonBase, AddonOAuthNodeSettingsBase):
 
         if add_log:
             extra = {'folder_id': self.folder_id}
-            self.nodelogger.log(action="node_deauthorized", extra=extra, save=True)
+            self.nodelogger.log(action='node_deauthorized', extra=extra, save=True)
 
         self.clear_settings()
         self.clear_auth()
